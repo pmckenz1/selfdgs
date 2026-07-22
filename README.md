@@ -5,6 +5,16 @@ spectrum (DGS) of biallelic SNPs.
 
 ## Install
 
+For now use:
+
+```bash
+git clone https://github.com/pmckenz1/selfdgs.git
+cd selfdgs
+pip install .
+```
+
+Soon we will get this on pypi and you can use:
+
 ```bash
 python -m pip install selfdgs
 ```
