@@ -6,7 +6,8 @@
 // values from SlimSimulationConfig and ValidationExperimentConfig:
 //
 //   ne, selfing_rate, chrom_length, mu, recomb_rate, n_sample, burn_mult,
-//   seed, and vcf_path.
+//   seed, and vcf_path. Optional n_sample_2 and vcf_path_2 request a second,
+//   independent sample from the same final population.
 
 initialize() {
     if (!exists("ne"))             defineConstant("ne", 1000);
@@ -18,6 +19,8 @@ initialize() {
     if (!exists("burn_mult"))      defineConstant("burn_mult", 10);
     if (!exists("seed"))           defineConstant("seed", 1);
     if (!exists("vcf_path"))       defineConstant("vcf_path", "out.vcf");
+    if (!exists("n_sample_2"))     defineConstant("n_sample_2", 0);
+    if (!exists("vcf_path_2"))     defineConstant("vcf_path_2", "out_2.vcf");
 
     defineConstant("burnin", asInteger(burn_mult * ne));
     defineConstant("end_cycle", burnin);
@@ -50,6 +53,10 @@ initialize() {
     catn("burnin = " + burnin);
     catn("end_cycle = " + end_cycle);
     catn("vcf_path = " + vcf_path);
+    if (n_sample_2 > 0) {
+        catn("n_sample_2 = " + n_sample_2);
+        catn("vcf_path_2 = " + vcf_path_2);
+    }
     catn("-------------------------------------------");
 }
 
@@ -63,6 +70,19 @@ end_cycle late() {
         outputMultiallelics=F,
         filePath=vcf_path
     );
+
+    // This is a separate sampling call: sampling is without replacement within
+    // each draw, but an individual may occur in both draws.
+    if (n_sample_2 > 0) {
+        catn("Sampling a second, independent draw of " + n_sample_2 +
+             " diploid individuals");
+        p1.outputVCFSample(
+            n_sample_2,
+            replace=F,
+            outputMultiallelics=F,
+            filePath=vcf_path_2
+        );
+    }
 
     community.simulationFinished();
 }

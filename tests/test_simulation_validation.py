@@ -157,6 +157,9 @@ def test_slim_configuration_and_script_conventions(tmp_path):
         "p1.outputVCFSample(",
         "replace=F",
         "outputMultiallelics=F",
+        'if (!exists("n_sample_2"))',
+        "if (n_sample_2 > 0)",
+        "filePath=vcf_path_2",
     ):
         assert statement in script
 
