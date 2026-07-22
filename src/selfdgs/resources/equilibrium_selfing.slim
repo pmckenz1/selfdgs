@@ -1,0 +1,68 @@
+// equilibrium_selfing.slim
+//
+// WF neutral diploid simulation with a constant selfing rate.
+//
+// Constants can be overridden with SLiM -d arguments. selfdgs passes these
+// values from SlimSimulationConfig and ValidationExperimentConfig:
+//
+//   ne, selfing_rate, chrom_length, mu, recomb_rate, n_sample, burn_mult,
+//   seed, and vcf_path.
+
+initialize() {
+    if (!exists("ne"))             defineConstant("ne", 1000);
+    if (!exists("selfing_rate"))   defineConstant("selfing_rate", 0.5);
+    if (!exists("chrom_length"))   defineConstant("chrom_length", 1000000);
+    if (!exists("mu"))             defineConstant("mu", 1e-8);
+    if (!exists("recomb_rate"))    defineConstant("recomb_rate", 1e-8);
+    if (!exists("n_sample"))       defineConstant("n_sample", 20);
+    if (!exists("burn_mult"))      defineConstant("burn_mult", 10);
+    if (!exists("seed"))           defineConstant("seed", 1);
+    if (!exists("vcf_path"))       defineConstant("vcf_path", "out.vcf");
+
+    defineConstant("burnin", asInteger(burn_mult * ne));
+    defineConstant("end_cycle", burnin);
+
+    setSeed(seed);
+
+    initializeSLiMOptions(preventIncidentalSelfing=T);
+
+    initializeMutationRate(mu);
+    initializeMutationType("m1", 0.5, "f", 0.0);
+
+    initializeGenomicElementType("g1", m1, 1.0);
+    initializeGenomicElement(g1, 0, chrom_length - 1);
+
+    initializeRecombinationRate(recomb_rate);
+}
+
+1 early() {
+    sim.addSubpop("p1", ne);
+    p1.setSelfingRate(selfing_rate);
+
+    catn("---------- simulation parameters ----------");
+    catn("ne = " + ne);
+    catn("selfing_rate = " + selfing_rate);
+    catn("chrom_length = " + chrom_length);
+    catn("mu = " + mu);
+    catn("recomb_rate = " + recomb_rate);
+    catn("n_sample = " + n_sample);
+    catn("burn_mult = " + burn_mult);
+    catn("burnin = " + burnin);
+    catn("end_cycle = " + end_cycle);
+    catn("vcf_path = " + vcf_path);
+    catn("-------------------------------------------");
+}
+
+end_cycle late() {
+    catn("Sampling " + n_sample +
+         " diploid individuals at cycle " + sim.cycle);
+
+    p1.outputVCFSample(
+        n_sample,
+        replace=F,
+        outputMultiallelics=F,
+        filePath=vcf_path
+    );
+
+    community.simulationFinished();
+}

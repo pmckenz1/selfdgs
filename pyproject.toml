@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=77.0.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "selfdgs"
+dynamic = ["version"]
+license = "MIT"
+license-files = ["LICENSE"]
+description = "Diploid genotype spectrum tools for estimating partial selfing rates from sequence data."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Patrick McKenzie" }
+]
+keywords = ["population genetics", "selfing", "VCF", "site frequency spectrum"]
+classifiers = [
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Bio-Informatics"
+]
+dependencies = [
+  "cyvcf2>=0.31.4",
+  "matplotlib",
+  "numpy",
+  "pandas",
+  "scipy"
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+dev = ["pytest", "jupyterlab", "nbconvert", "build"]
+
+[project.scripts]
+selfdgs = "selfdgs.cli:main"
+
+[project.urls]
+Repository = "https://github.com/pmckenz1/selfdgs.git"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "selfdgs._version.__version__" }
+
+[tool.setuptools.package-data]
+selfdgs = ["py.typed", "resources/*.slim"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+  "plot: plotting tests",
+  "slim: tests that require an external SLiM executable"
+]
