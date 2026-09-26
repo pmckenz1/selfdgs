@@ -14,7 +14,7 @@ individuals. The SLiM recipe simulates that biological sampling design.
    1,000-site pretend VCF with two simulated populations, then demonstrates 20
    reproducible draws per population, per-draw fits, summaries, and diagnostics.
 3. [Fixed-individual SLiM validation](03_slim_validation.ipynb) samples the same
-   four individuals across 30 loci in one shared-pedigree population, fits the
+   20 individuals across 30 loci in one shared-pedigree population, fits the
    DGS, and explains how to assess recovery across independent population
    replicates. Requires SLiM 5.2 on `PATH`.
 
