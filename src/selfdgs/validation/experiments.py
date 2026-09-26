@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import json
 from numbers import Integral, Real
 from pathlib import Path
@@ -16,18 +16,20 @@ import pandas as pd
 
 from selfdgs._outputs import install_staged_outputs
 from selfdgs.fit import default_selfing_grid, fit_selfing
-from selfdgs.io.vcf import dgs_from_vcf
+from selfdgs.io.vcf import dgs_from_vcf, read_vcf_samples
 from selfdgs.results import FitResult
-from selfdgs.simulation.slim import SlimRunResult, SlimSimulationConfig, run_slim_simulation
+from selfdgs.simulation.slim import (
+    SlimRunResult, SlimSimulationConfig, run_slim_simulation, default_slim_script_path,
+)
 from selfdgs.spectrum import DGSConfig, DGSCounts, filter_polymorphic_dgs, write_dgs_csv
 
 
 @dataclass(frozen=True)
-class LocusResult:
-    """Summary from one simulated or existing locus VCF."""
+class VCFResult:
+    """Summary from one VCF, which may contain multiple shared-pedigree loci."""
 
     rep: int
-    locus: int
+    vcf_index: int
     seed: int | None
     true_s: float | None
     vcf_path: str
@@ -38,6 +40,16 @@ class LocusResult:
     slim_stdout_path: str | None = None
     slim_stderr_path: str | None = None
     slim_metadata: str | None = None
+    n_loci: int = 1
+
+    @property
+    def locus(self) -> int:
+        """Alias for vcf_index."""
+        return self.vcf_index
+
+
+# Import alias for callers using the locus-oriented name.
+LocusResult = VCFResult
 
 
 @dataclass(frozen=True)
@@ -49,18 +61,23 @@ class ReplicateResult:
     observed_counts: DGSCounts
     polymorphic_counts: DGSCounts
     fit: FitResult
-    loci: tuple[LocusResult, ...]
+    vcf_results: tuple[VCFResult, ...]
+
+    @property
+    def loci(self) -> tuple[VCFResult, ...]:
+        """Alias for vcf_results."""
+        return self.vcf_results
 
 
 @dataclass(frozen=True)
 class ValidationExperimentConfig:
     """Configuration for a replicate/locus SLiM validation experiment."""
 
-    slim_script: str | Path
-    outdir: str | Path
-    ne: int = 500
+    slim_script: str | Path | None = None
+    outdir: str | Path | None = None
+    ne: int | None = field(default=None, repr=False)
     true_s: float = 0.5
-    n_independent_loci: int = 1
+    n_independent_loci: int | None = field(default=None, repr=False)
     chrom_length_each: int = 10_000
     mu: float = 1e-7
     recomb_rate: float = 5e-8
@@ -75,7 +92,7 @@ class ValidationExperimentConfig:
     vcf_malformed: str = "error"
     vcf_multiallelic: str = "skip"
     vcf_require_pass: bool = True
-    vcf_polarization: str = "ref"
+    vcf_polarization: str = "folded"
     vcf_outgroup_sample_ids: Sequence[str] | None = None
     vcf_min_outgroup_called: int = 1
     vcf_require_homozygous_outgroup: bool = True
@@ -83,11 +100,26 @@ class ValidationExperimentConfig:
     fit_error_rate: float = 0.0
     fit_mode: str | None = None
     extra_defines: Mapping[str, object] = field(default_factory=dict)
+    sampling_design: str = "fixed_individuals"
+    census_size: int | None = field(default=None, kw_only=True)
+    n_loci: int | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
+        if self.outdir is None:
+            raise ValueError("outdir is required.")
+        for name, alias, default in (("census_size", "ne", 500), ("n_loci", "n_independent_loci", 1)):
+            value, alias_value = getattr(self, name), getattr(self, alias)
+            if value is not None and alias_value is not None and value != alias_value:
+                raise ValueError(f"{name} and {alias} must agree when both are supplied.")
+            resolved = value if value is not None else alias_value
+            resolved = default if resolved is None else resolved
+            object.__setattr__(self, name, resolved)
+            object.__setattr__(self, alias, resolved)
+        if self.sampling_design not in {"fixed_individuals", "independent_populations"}:
+            raise ValueError("sampling_design must be fixed_individuals or independent_populations.")
         positive_integers = {
-            "ne": self.ne,
-            "n_independent_loci": self.n_independent_loci,
+            "census_size": self.census_size,
+            "n_loci": self.n_loci,
             "chrom_length_each": self.chrom_length_each,
             "n_sample": self.n_sample,
             "n_reps": self.n_reps,
@@ -104,12 +136,25 @@ class ValidationExperimentConfig:
             raise ValueError(
                 f"Validation integer parameters must be positive integers: {invalid}"
             )
+        if self.n_sample > self.census_size:
+            raise ValueError("n_sample cannot exceed the diploid census size (census_size).")
         if (
             isinstance(self.burn_mult, bool)
             or not isinstance(self.burn_mult, Integral)
             or self.burn_mult < 0
         ):
             raise ValueError("burn_mult must be a non-negative integer.")
+        if self.sampling_design == "fixed_individuals":
+            if self.burn_mult < 1:
+                raise ValueError("Fixed-individual simulations require burn_mult >= 1.")
+            if {"n_loci", "history_path"}.intersection(self.extra_defines):
+                raise ValueError("n_loci and history_path are managed by the fixed-individual workflow.")
+            if (
+                self.slim_script is not None
+                and Path(self.slim_script).resolve()
+                == default_slim_script_path("independent_populations").resolve()
+            ):
+                raise ValueError("Use slim_script=None for the bundled fixed-individual model.")
         if (
             isinstance(self.seed, bool)
             or not isinstance(self.seed, Integral)
@@ -154,6 +199,10 @@ class ValidationExperimentConfig:
         if self.s_grid is None:
             return default_selfing_grid()
         return self.s_grid
+
+    def script_path(self) -> Path:
+        """Resolve the model for this sampling design."""
+        return Path(self.slim_script) if self.slim_script is not None else default_slim_script_path(self.sampling_design)
 
     def likelihood_mode(self) -> str:
         """Return the likelihood mode used for fitting parsed DGS counts."""
@@ -200,8 +249,8 @@ def _write_replicate_outputs(replicate: ReplicateResult, rep_outdir: Path) -> No
     replicate.fit.to_json(rep_outdir / "fit_result.json")
     replicate.fit.to_csv(rep_outdir / "likelihood.csv")
     pd.DataFrame([replicate.fit.summary_dict()]).to_csv(rep_outdir / "fit_summary.csv", index=False)
-    pd.DataFrame([asdict(locus) for locus in replicate.loci]).to_csv(
-        rep_outdir / "loci.csv",
+    pd.DataFrame([asdict(locus) for locus in replicate.vcf_results]).to_csv(
+        rep_outdir / "vcfs.csv",
         index=False,
     )
 
@@ -209,7 +258,9 @@ def _write_replicate_outputs(replicate: ReplicateResult, rep_outdir: Path) -> No
 def _write_validation_config(config: ValidationExperimentConfig, outdir: Path) -> None:
     """Persist the complete requested and resolved experiment configuration."""
     payload = asdict(config)
-    payload["slim_script"] = str(config.slim_script)
+    payload.pop("ne")
+    payload.pop("n_independent_loci")
+    payload["slim_script"] = str(config.script_path())
     payload["outdir"] = str(config.outdir)
     payload["s_grid"] = None if config.s_grid is None else list(config.s_grid)
     payload["resolved_s_grid"] = [float(value) for value in config.grid()]
@@ -220,7 +271,11 @@ def _write_validation_config(config: ValidationExperimentConfig, outdir: Path) -
 
 
 def run_validation_experiment(config: ValidationExperimentConfig) -> tuple[ReplicateResult, ...]:
-    """Run a SLiM validation experiment with replicate/locus pooling."""
+    """Fit independently simulated replicates under an explicit sampling design.
+
+    Fixed individuals share one multilocus population per replicate. The
+    independent_populations control pools a separate population per locus.
+    """
     final_outdir = Path(config.outdir)
     if final_outdir.exists() and not final_outdir.is_dir():
         raise NotADirectoryError(f"Output path is not a directory: {final_outdir}")
@@ -240,16 +295,21 @@ def run_validation_experiment(config: ValidationExperimentConfig) -> tuple[Repli
     for rep in range(config.n_reps):
         rep_outdir = outdir / f"rep{rep:03d}"
         total_counts: DGSCounts = Counter()
-        loci: list[LocusResult] = []
+        loci: list[VCFResult] = []
 
-        for locus in range(config.n_independent_loci):
+        fixed = config.sampling_design == "fixed_individuals"
+        for locus in range(1 if fixed else config.n_loci):
             locus_seed = int(rng.integers(1, 1_000_000_000))
-            vcf_path = rep_outdir / f"locus{locus:04d}_seed{locus_seed}.vcf"
+            vcf_path = rep_outdir / ("sample.vcf" if fixed else f"locus{locus:04d}_seed{locus_seed}.vcf")
             final_vcf_path = final_outdir / rep_outdir.name / vcf_path.name
+            extra_defines = dict(config.extra_defines)
+            history_path = rep_outdir / "sampled_individuals.csv"
+            if fixed:
+                extra_defines.update(n_loci=config.n_loci, history_path=history_path)
             slim_config = SlimSimulationConfig(
-                slim_script=config.slim_script,
+                slim_script=config.script_path(),
                 vcf_path=vcf_path,
-                ne=config.ne,
+                census_size=config.census_size,
                 selfing_rate=config.true_s,
                 mu=config.mu,
                 chrom_length=config.chrom_length_each,
@@ -258,11 +318,36 @@ def run_validation_experiment(config: ValidationExperimentConfig) -> tuple[Repli
                 burn_mult=config.burn_mult,
                 seed=locus_seed,
                 slim_executable=config.slim_executable,
-                extra_defines=config.extra_defines,
+                extra_defines=extra_defines,
             )
             slim_result: SlimRunResult = run_slim_simulation(slim_config)
             final_slim_metadata = dict(slim_result.metadata)
             final_slim_metadata["vcf_path"] = str(final_vcf_path)
+            if fixed:
+                samples = read_vcf_samples(vcf_path)
+                histories = pd.read_csv(history_path)
+                required = {"vcf_column", "population_index", "selfing_generations"}
+                if not required.issubset(histories.columns):
+                    raise ValueError("Invalid fixed-individual sample manifest: missing columns.")
+                numeric = histories[list(required)].apply(pd.to_numeric, errors="coerce")
+                if (numeric.isna().any().any()
+                    or not (numeric % 1 == 0).all().all()
+                    or len(samples) != config.n_sample
+                    or histories["vcf_column"].tolist() != list(range(config.n_sample))
+                    or histories["population_index"].nunique() != config.n_sample
+                    or not histories["population_index"].between(0, config.census_size - 1).all()
+                    or not histories["selfing_generations"].between(
+                        -1, config.burn_mult * config.census_size - 1
+                    ).all()):
+                    raise ValueError("Invalid fixed-individual sample manifest.")
+                histories["vcf_sample"] = samples
+                histories["rep"] = rep
+                histories["seed"] = locus_seed
+                histories.to_csv(history_path, index=False)
+                final_slim_metadata["extra_defines"] = {
+                    **final_slim_metadata["extra_defines"],
+                    "history_path": str(final_outdir / rep_outdir.name / history_path.name),
+                }
             stdout_path = vcf_path.with_suffix(".slim.stdout.txt")
             stderr_path = vcf_path.with_suffix(".slim.stderr.txt")
             stdout_path.write_text(slim_result.stdout)
@@ -284,14 +369,15 @@ def run_validation_experiment(config: ValidationExperimentConfig) -> tuple[Repli
             total_counts.update(observed)
             poly_counts = filter_polymorphic_dgs(observed, n_diploids=config.n_sample)
             loci.append(
-                LocusResult(
+                VCFResult(
                     rep=rep,
-                    locus=locus,
+                    vcf_index=locus,
                     seed=locus_seed,
                     true_s=config.true_s,
                     vcf_path=str(final_vcf_path),
                     n_all_sites=sum(observed.values()),
                     n_poly_sites=sum(poly_counts.values()),
+                    n_loci=config.n_loci if fixed else 1,
                     slim_returncode=slim_result.returncode,
                     slim_command=json.dumps(list(slim_result.command)),
                     slim_stdout_path=str(final_vcf_path.with_suffix(".slim.stdout.txt")),
@@ -306,20 +392,24 @@ def run_validation_experiment(config: ValidationExperimentConfig) -> tuple[Repli
 
         polymorphic_counts, fit = _fit_counts(
             total_counts,
-            ne=config.ne,
+            ne=config.census_size,
             n_sample=config.n_sample,
             s_grid=config.grid(),
             fit_error_rate=config.fit_error_rate,
             fit_mode=config.likelihood_mode(),
             input_polarization=config.vcf_polarization,
         )
+        fit = replace(fit, metadata={
+            **fit.metadata, "sampling_design": config.sampling_design,
+            "population_replicate": rep, "n_loci": config.n_loci,
+        })
         replicate = ReplicateResult(
             rep=rep,
             true_s=config.true_s,
             observed_counts=Counter(total_counts),
             polymorphic_counts=polymorphic_counts,
             fit=fit,
-            loci=tuple(loci),
+            vcf_results=tuple(loci),
         )
         _write_replicate_outputs(replicate, rep_outdir)
         results.append(replicate)
@@ -327,13 +417,14 @@ def run_validation_experiment(config: ValidationExperimentConfig) -> tuple[Repli
     summary_rows = [
         {
             "rep": result.rep,
-            "ne": config.ne,
+            "census_size": config.census_size,
             "true_s": result.true_s,
             "n_diploids": config.n_sample,
             "best_s": result.fit.best_s,
             "best_loglik": result.fit.best_loglik,
             "n_sites": result.fit.n_sites,
-            "n_loci": len(result.loci),
+            "n_loci": config.n_loci,
+            "sampling_design": config.sampling_design,
             "chrom_length_each": config.chrom_length_each,
             "mu": config.mu,
             "recomb_rate": config.recomb_rate,
@@ -376,7 +467,8 @@ def summarize_existing_vcfs(
     vcf_paths: Iterable[str | Path],
     *,
     true_s: float | None = None,
-    ne: int = 1,
+    census_size: int | None = None,
+    ne: int | None = None,
     n_diploids: int = 4,
     s_grid: Sequence[float] | None = None,
     missing: str = "skip-site",
@@ -390,12 +482,31 @@ def summarize_existing_vcfs(
     skip_polymorphic_outgroup: bool = True,
     fit_error_rate: float = 0.0,
     fit_mode: str | None = None,
+    sampling_design: str = "fixed_individuals",
 ) -> ReplicateResult:
-    """Pool existing VCFs, fit selfing rate, and return validation summaries."""
+    """Pool VCFs, checking shared focal identities for fixed individuals.
+
+    Use independent_populations only when different samples across VCFs are
+    intentional. Matching names alone cannot establish biological provenance.
+    """
+    if census_size is not None and ne is not None and census_size != ne:
+        raise ValueError("census_size and ne must agree when both are supplied.")
+    census_size = census_size if census_size is not None else ne
+    census_size = 1 if census_size is None else census_size
+    if sampling_design not in {"fixed_individuals", "independent_populations"}:
+        raise ValueError("Invalid sampling_design.")
     _validate_fixed_sample_policies(missing, malformed)
     total_counts: DGSCounts = Counter()
-    loci: list[LocusResult] = []
+    loci: list[VCFResult] = []
+    expected_samples = None
     for locus, path in enumerate(vcf_paths):
+        if sampling_design == "fixed_individuals":
+            samples = set(read_vcf_samples(path))
+            if polarization == "outgroup-consensus":
+                samples.difference_update(outgroup_sample_ids or ())
+            if expected_samples is not None and samples != expected_samples:
+                raise ValueError("Fixed-individual VCFs must contain the same focal sample IDs.")
+            expected_samples = samples
         observed = dgs_from_vcf(
             path,
             n_diploids=n_diploids,
@@ -412,9 +523,9 @@ def summarize_existing_vcfs(
         total_counts.update(observed)
         poly_counts = filter_polymorphic_dgs(observed, n_diploids=n_diploids)
         loci.append(
-            LocusResult(
+            VCFResult(
                 rep=0,
-                locus=locus,
+                vcf_index=locus,
                 seed=None,
                 true_s=true_s,
                 vcf_path=str(path),
@@ -425,18 +536,19 @@ def summarize_existing_vcfs(
 
     polymorphic_counts, fit = _fit_counts(
         total_counts,
-        ne=ne,
+        ne=census_size,
         n_sample=n_diploids,
         s_grid=default_selfing_grid() if s_grid is None else s_grid,
         fit_error_rate=fit_error_rate,
         fit_mode=fit_mode or ("folded" if polarization == "folded" else "unfolded"),
         input_polarization=polarization,
     )
+    fit = replace(fit, metadata={**fit.metadata, "sampling_design": sampling_design})
     return ReplicateResult(
         rep=0,
         true_s=true_s,
         observed_counts=Counter(total_counts),
         polymorphic_counts=polymorphic_counts,
         fit=fit,
-        loci=tuple(loci),
+        vcf_results=tuple(loci),
     )

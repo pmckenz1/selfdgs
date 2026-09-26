@@ -40,7 +40,10 @@ def plot_cumulative_convergence(
     out: str | Path | None = None,
     true_s: float | None = None,
 ):
-    """Plot cumulative best selfing-rate estimates as replicate curves are added."""
+    """Plot cumulative estimates across independent replicates at one true rate.
+
+    Replicates must not be nested samples or paired analyses of one population.
+    """
     plt = require_pyplot()
     frame = dataframe_or_csv(likelihoods)
     required = {"rep", "s", "loglik"}

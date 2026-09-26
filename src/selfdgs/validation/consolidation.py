@@ -19,7 +19,7 @@ VALIDATION_COLLECTION_COLUMNS = [
     "run_path",
     "base_dir",
     "rep",
-    "ne",
+    "census_size",
     "true_s",
     "n_diploids",
     "best_s",
@@ -70,7 +70,7 @@ def _first_replicate_file(run_dir: Path, filename: str) -> Path | None:
 
 
 def _replicate_dir(run_dir: Path, rep: object) -> Path | None:
-    """Resolve canonical and legacy replicate directory names by replicate ID."""
+    """Resolve replicate directory names by replicate ID."""
     try:
         rep_id = int(rep)
     except (TypeError, ValueError):
@@ -86,7 +86,12 @@ def _replicate_dir(run_dir: Path, rep: object) -> Path | None:
 
 
 def _candidate_run_dirs(base_dir: Path, pattern: str) -> list[Path]:
-    candidates = [path for path in base_dir.glob(pattern) if path.is_dir()]
+    candidates = [
+        path for path in base_dir.glob(pattern)
+        if path.is_dir() and any((path / name).exists() for name in (
+            "validation_summary.csv", "validation_config.json", "fit_summary.csv"
+        ))
+    ]
     if any(
         (base_dir / name).exists()
         for name in (
@@ -95,21 +100,20 @@ def _candidate_run_dirs(base_dir: Path, pattern: str) -> list[Path]:
             "fit_summary.csv",
         )
     ):
-        candidates.append(base_dir)
+        return [base_dir]
     return sorted(set(candidates), key=lambda path: str(path))
 
 
 def discover_validation_runs(
     base_dirs: str | Path | Iterable[str | Path],
     *,
-    pattern: str = "ne*_self*",
+    pattern: str = "*",
 ) -> pd.DataFrame:
     """Discover saved validation run directories.
 
-    Directories are considered runs when they match `pattern`, or when the base
-    directory itself contains `validation_summary.csv` or `fit_summary.csv`.
-    Directory names such as `ne100_self0.500` are parsed into `ne` and `true_s`
-    when possible.
+    Matching child directories and the base directory are inspected for saved
+    configuration or summary files. Settings are read from those files;
+    names such as `ne100_self0.500` can also supply population size and rate.
     """
     rows: list[dict[str, object]] = []
     for base_dir in _as_base_dirs(base_dirs):
@@ -142,11 +146,15 @@ def discover_validation_runs(
                 is not None,
             }
             row.update(parsed)
-            for column in ("ne", "true_s"):
+            for column in ("census_size", "ne", "true_s", "sampling_design", "n_loci"):
                 if column not in row and column in summary:
                     row[column] = summary[column]
                 elif column not in row and column in config:
                     row[column] = config[column]
+            if "n_loci" not in row and "n_independent_loci" in config:
+                row["n_loci"] = config["n_independent_loci"]
+            if "census_size" not in row and "ne" in row:
+                row["census_size"] = row["ne"]
             if "n_diploids" in fit:
                 row["n_diploids"] = fit["n_diploids"]
             elif "n_sample" in config:
@@ -183,7 +191,7 @@ def _annotate_run_rows(frame: pd.DataFrame, run: Mapping[str, object], run_dir: 
     out = frame.copy()
     out.insert(0, "run_id", str(run.get("run_id", run_dir.name)))
     out.insert(1, "run_path", str(run_dir))
-    for column in ("base_dir", "ne", "true_s", "n_diploids"):
+    for column in ("base_dir", "census_size", "ne", "true_s", "n_diploids", "sampling_design", "n_loci"):
         if column in run and column not in out.columns:
             out[column] = run[column]
     if "n_diploids" not in out.columns:
@@ -210,6 +218,8 @@ def _annotate_run_rows(frame: pd.DataFrame, run: Mapping[str, object], run_dir: 
             paths.append(str(path) if path.exists() else pd.NA)
         if any(not pd.isna(path) for path in paths):
             out[file_column] = paths
+    if "ne" in out:
+        out["census_size"] = out.get("census_size", out["ne"]).fillna(out["ne"])
     return out
 
 
@@ -278,14 +288,25 @@ def load_likelihood_collection(
 def summarize_estimator_recovery(
     validation_table: pd.DataFrame,
     *,
-    group_columns: Sequence[str] = ("ne", "true_s"),
+    group_columns: Sequence[str] = ("census_size", "true_s", "n_diploids", "n_loci", "sampling_design"),
     estimate_column: str = "best_s",
     true_column: str = "true_s",
 ) -> pd.DataFrame:
-    """Summarize estimator recovery bias, error, and RMSE by simulation setting."""
+    """Summarize recovery separately by sample size, locus count, and design.
+
+    n_runs counts fitted rows, not necessarily independent populations. Paired
+    designs and nested samples share population replicates; retain their IDs
+    when comparing conditions. Metrics here are descriptive, not uncertainty
+    estimates for the recovery statistics.
+    """
     missing = {estimate_column, true_column}.difference(validation_table.columns)
     if missing:
         raise ValueError(f"validation_table is missing required columns: {sorted(missing)}")
+    validation_table = validation_table.copy()
+    if "ne" in validation_table:
+        validation_table["census_size"] = validation_table.get(
+            "census_size", validation_table["ne"]
+        ).fillna(validation_table["ne"])
     group_cols = [column for column in group_columns if column in validation_table.columns]
     frame = validation_table.dropna(subset=[estimate_column, true_column]).copy()
     if frame.empty:

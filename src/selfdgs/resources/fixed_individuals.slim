@@ -1,0 +1,53 @@
+// SLiM 5.2: neutral WF population with one pedigree shared by all loci.
+// ne is the diploid census size; chrom_length is the length of each locus.
+// Required defines are supplied by run_validation_experiment.
+initialize() {
+    setSeed(seed);
+    defineConstant("end_cycle", asInteger(burn_mult * ne));
+    initializeSLiMOptions(preventIncidentalSelfing=T);
+    initializeMutationRate(mu);
+    initializeMutationType("m1", 0.5, "f", 0.0);
+    initializeGenomicElementType("g1", m1, 1.0);
+    rates = c();
+    ends = c();
+    for (locus in seqLen(n_loci)) {
+        start = locus * (chrom_length + 1);
+        end = start + chrom_length - 1;
+        initializeGenomicElement(g1, start, end);
+        rates = c(rates, recomb_rate);
+        ends = c(ends, end);
+        if (locus < n_loci - 1) {
+            rates = c(rates, 0.5);
+            ends = c(ends, end + 1);
+        }
+    }
+    initializeRecombinationRate(rates, ends);
+}
+
+1 early() {
+    sim.addSubpop("p1", ne);
+    p1.setSelfingRate(selfing_rate);
+    // Unknown until an outcross has been observed; retain -1 in the output.
+    p1.individuals.tag = -1;
+}
+
+modifyChild() {
+    child.tag = 0;
+    if (isSelfing) {
+        child.tag = -1;
+        if (parent1.tag >= 0)
+            child.tag = parent1.tag + 1;
+    }
+    return T;
+}
+
+end_cycle late() {
+    // The selected vector is used once for the entire multilocus genome.
+    inds = sample(p1.individuals, n_sample, replace=F);
+    inds.outputIndividualsToVCF(filePath=vcf_path, outputMultiallelics=F);
+    lines = "vcf_column,population_index,selfing_generations";
+    for (i in seqAlong(inds))
+        lines = c(lines, paste(c(i, inds[i].index, inds[i].tag), sep=","));
+    writeFile(history_path, lines);
+    sim.simulationFinished();
+}

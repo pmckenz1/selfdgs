@@ -18,13 +18,19 @@ class SLiMUnavailableError(RuntimeError):
     """Raised when a SLiM run is requested but SLiM is not available."""
 
 
-def default_slim_script_path() -> Path:
-    """Return the packaged equilibrium selfing SLiM script path.
+def default_slim_script_path(sampling_design: str = "fixed_individuals") -> Path:
+    """Return the packaged script for the requested sampling design.
 
     The package is installed from ordinary wheels as unpacked files, so this
     path is suitable for passing directly to the `slim` executable.
     """
-    return Path(resources.files("selfdgs.resources") / "equilibrium_selfing.slim")
+    scripts = {
+        "independent_populations": "equilibrium_selfing.slim",
+        "fixed_individuals": "fixed_individuals.slim",
+    }
+    if sampling_design not in scripts:
+        raise ValueError(f"Unknown sampling design: {sampling_design!r}")
+    return Path(resources.files("selfdgs.resources") / scripts[sampling_design])
 
 
 @dataclass(frozen=True)
@@ -33,7 +39,7 @@ class SlimSimulationConfig:
 
     slim_script: str | Path
     vcf_path: str | Path
-    ne: int = 500
+    ne: int | None = field(default=None, repr=False)
     selfing_rate: float = 0.5
     mu: float = 1e-7
     chrom_length: int = 10_000
@@ -44,9 +50,17 @@ class SlimSimulationConfig:
     slim_executable: str = "slim"
     extra_defines: Mapping[str, object] = field(default_factory=dict)
 
+    census_size: int | None = field(default=None, kw_only=True)
+
     def __post_init__(self) -> None:
+        if self.census_size is not None and self.ne is not None and self.census_size != self.ne:
+            raise ValueError("census_size and ne must agree when both are supplied.")
+        size = self.census_size if self.census_size is not None else self.ne
+        size = 500 if size is None else size
+        object.__setattr__(self, "census_size", size)
+        object.__setattr__(self, "ne", size)
         positive_integers = {
-            "ne": self.ne,
+            "census_size": self.census_size,
             "chrom_length": self.chrom_length,
             "n_sample": self.n_sample,
             "seed": self.seed,
@@ -101,6 +115,7 @@ class SlimSimulationConfig:
     def metadata(self) -> dict[str, object]:
         """Return JSON/CSV friendly simulation metadata."""
         data = asdict(self)
+        data.pop("ne")
         data["slim_script"] = str(self.slim_script)
         data["vcf_path"] = str(self.vcf_path)
         data["extra_defines"] = dict(self.extra_defines)

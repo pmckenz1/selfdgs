@@ -144,12 +144,12 @@ def expected_dgs_branch_lengths(
         If true, use ``time_scale = (2 - s) * N``. If false, use normalized
         coalescent units. The global scale cancels when converting to
         probabilities, but generation-time branch lengths are useful for model
-        inspection and future extensions.
+        inspection.
     method
         ``"combinatorial"`` (the default) groups label-equivalent fast states
         and uses exact Kingman subset weights. ``"recursive"`` runs the
-        previous fully articulated state-by-state implementation, retained as
-        a readable reference and correctness check.
+        state-by-state recursion, which provides a readable reference and
+        an independent correctness check.
     """
     s, N, n_diploids = _coerce_model_inputs(s, N, n_diploids, method)
     return Counter(
@@ -197,10 +197,11 @@ def dgs_probabilities(
     """Normalize expected branch lengths into DGS probabilities.
 
     These probabilities are intended for likelihoods conditional on the number
-    of segregating sites. ``N`` is retained in the API for consistency with the
-    expected-branch-length function; under the current conditional likelihood,
-    it does not change normalized probabilities unless future model options add
-    non-global scaling.
+    of segregating sites. They average over individual selfing histories;
+    they are not conditioned on the realized histories of a fixed sample and
+    do not specify a joint multilocus distribution. ``N`` sets a global
+    branch-length scale that cancels during normalization, so it does not
+    affect these probabilities.
 
     ``method="recursive"`` selects the articulated reference implementation;
     the exact, faster ``"combinatorial"`` implementation is the default.

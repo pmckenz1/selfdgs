@@ -130,7 +130,12 @@ def plot_joint_likelihood(
     out: str | Path | None = None,
     true_s: float | None = None,
 ):
-    """Plot a joint likelihood curve by summing log-likelihoods by ``s``."""
+    """Sum log-likelihoods for independent datasets sharing a selfing rate.
+
+    Do not combine nested samples, overlapping empirical draws, or paired
+    analyses of the same population. Independence is the caller's responsibility;
+    a summed composite-likelihood profile is not calibrated uncertainty.
+    """
     plt = require_pyplot()
     frame = pd.read_csv(likelihoods) if not isinstance(likelihoods, pd.DataFrame) else likelihoods.copy()
     required = {"s", "loglik"}

@@ -51,7 +51,7 @@ class EmpiricalAnalysisConfig:
 
     vcf_path: str | Path
     n_diploids: int
-    n_draws: int = 100
+    n_draws: int = 1
     seed: int = 1
     mode: str = "folded"
     fit_mode: LikelihoodMode | None = None

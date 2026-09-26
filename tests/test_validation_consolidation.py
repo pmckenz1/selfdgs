@@ -213,3 +213,40 @@ def test_recovery_summary_metrics_are_correct_for_tiny_table():
     assert summary.loc[0, "mean_estimate"] == pytest.approx(0.5333333333)
     assert summary.loc[0, "bias"] == pytest.approx(0.0333333333)
     assert summary.loc[0, "mae"] == pytest.approx(0.1)
+
+
+def test_recovery_keeps_sampling_design_size_and_locus_count_separate():
+    rows = [
+        {"ne": 100, "true_s": 0.5, "n_diploids": n, "n_loci": loci,
+         "sampling_design": design, "best_s": 0.4}
+        for n in (3, 6) for loci in (10, 30)
+        for design in ("fixed_individuals", "independent_populations")
+    ]
+    summary = summarize_estimator_recovery(pd.DataFrame(rows))
+    assert len(summary) == 8
+    assert summary.n_runs.eq(1).all()
+
+
+def test_discovery_reads_census_size_without_directory_naming_convention(tmp_path):
+    run = tmp_path / "fixed_sample_experiment"
+    run.mkdir()
+    (tmp_path / "unrelated").mkdir()
+    pd.DataFrame([{"census_size": 250, "true_s": 0.5, "best_s": 0.4}]).to_csv(
+        run / "validation_summary.csv", index=False,
+    )
+    runs = discover_validation_runs(tmp_path)
+    assert runs.run_id.tolist() == [run.name]
+    collection = load_validation_collection(runs)
+    summary = summarize_estimator_recovery(collection)
+    assert summary.census_size.tolist() == [250]
+
+
+def test_recovery_normalizes_mixed_population_size_columns():
+    frame = pd.DataFrame([
+        {"ne": 100, "true_s": 0.5, "best_s": 0.4},
+        {"census_size": 100, "true_s": 0.5, "best_s": 0.6},
+        {"census_size": 200, "true_s": 0.5, "best_s": 0.7},
+    ])
+    summary = summarize_estimator_recovery(frame).set_index("census_size")
+    assert summary.loc[100, "n_runs"] == 2
+    assert summary.loc[200, "n_runs"] == 1

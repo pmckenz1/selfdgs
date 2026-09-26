@@ -5,18 +5,12 @@ spectrum (DGS) of biallelic SNPs.
 
 ## Install
 
-For now use:
+Install from source:
 
 ```bash
 git clone https://github.com/pmckenz1/selfdgs.git
 cd selfdgs
 pip install .
-```
-
-Soon we will get this on pypi and you can use:
-
-```bash
-python -m pip install selfdgs
 ```
 
 ## Fit a VCF
@@ -35,7 +29,7 @@ Start with `results/fit_summary.csv`:
 
 - `best_s`: estimated selfing rate, from 0 to 1
 - `support_interval`: likelihood support range (not automatically a calibrated
-  confidence interval if there's linkage among sites)
+  confidence interval, even for unlinked loci)
 - `n_sites`: number polymorphic sites used in the fit
 - `warnings`: anything needing attention
 
@@ -59,9 +53,37 @@ Malformed genotypes are always errors by default. Multiallelic sites are skipped
 
 We recommend a folded analysis unless you have a reliable way to identify the ancestral allele.
 
+## Fixed individuals across loci
+
+A genomic analysis should retain the same focal individuals at every site.
+`selfdgs fit samples.vcf --out results/` uses all focal samples in the VCF;
+`--n-diploids` checks their number and does not choose a subset. Missing calls
+exclude the affected site rather than replacing an individual.
+
+To select four named individuals from a larger VCF, put their IDs in
+`focal_samples.txt`, one per line, and run:
+
+```bash
+selfdgs empirical samples.vcf \
+  --sample-list focal=focal_samples.txt \
+  --n-diploids 4 --n-draws 1 \
+  --out fixed_sample_results/
+```
+
+The list must contain exactly four IDs to use all four without subsampling.
+`draw_manifest.csv` records the selected individuals. Each draw holds its
+individuals fixed across all retained sites.
+
+The fitted model averages over individual selfing histories. It does not
+condition on the realized histories of your sample. Shared histories can
+induce dependence among unlinked loci, so adding loci to a small fixed sample
+does not provide independent draws of those histories. Interpret likelihood
+support as descriptive; assess estimator variation using independent population
+replicates with a matching sampling design.
+
 ## Other common tasks
 
-Repeatedly fit randomly fixed-sample-size subsets from a larger VCF:
+Assess sensitivity to sample choice with repeated fixed-size subsets:
 
 ```bash
 selfdgs empirical samples.vcf \
@@ -100,22 +122,40 @@ Fit an existing DGS table:
 selfdgs fit observed_dgs.csv --dgs-csv --out results/
 ```
 
-Run a validation experiment with the bundled SLiM script:
+Simulate a fixed sample across loci in a shared population pedigree:
 
 ```bash
 selfdgs simulate --out validation/ --selfing-rate 0.5 \
-  --ne 100 \
+  --sampling-design fixed_individuals --n-reps 10 \
+  --census-size 100 \
   --n-loci 30 \
   --chrom-length 20000 \
   --mu 1e-5
 ```
 
-SLiM must be installed separately.
+Install SLiM 5.2 separately. Each replicate simulates one multilocus population,
+then samples the same individuals across all loci. Adjacent loci have recombination
+probability 0.5 between them. `--census-size` is the diploid census population size;
+`--n-sample` is the number of sampled diploids. The default sampling design is
+`fixed_individuals`.
+
+Each `repNNN/` directory contains `sample.vcf`, `sampled_individuals.csv`, DGS
+and likelihood tables, and SLiM logs. `vcfs.csv` records the VCF index, locus
+count, seed, command, and simulation metadata. The sample manifest maps VCF columns to
+population indices and consecutive selfing generations (`-1` means the history
+is unknown because no outcross was observed). `validation_config.json` and
+`validation_summary.csv` record the design and settings.
+
+Use `--sampling-design independent_populations` to check marginal DGS
+expectations by pooling a separate population and sample for each locus.
+That control averages over individual histories and does not reproduce a
+fixed-individual genomic dataset. See the [validation recipe](docs/cookbook/03_slim_validation.ipynb).
 
 The simple `fit` vs. `empirical` commands use the same VCF scanning, filtering,
 polarization, DGS construction, and likelihood code. The `empirical` command just
 adds some potentially useful options like sample grouping and repeated fixed-size
-sample draws.
+sample draws. Overlapping draws measure sensitivity to sample choice; they are
+not independent replicates and their likelihoods should not be summed.
 
 ## Read the outputs
 
@@ -143,10 +183,14 @@ Each site is summarized by its counts of the three diploid genotype classes.
 partial-selfing model and maximizes a composite likelihood. The likelihood is
 conditional on segregating sites, excluding the two monomorphic configurations.
 
-Linkage can make likelihood support intervals narrower than they should be.
-It would be good to try calibrating uncertainty
-with simulations or a bootstrap before interpreting a support interval
-as a confidence interval, but we haven't implemented this yet.
+The model assumes a neutral, constant-size population at equilibrium under a
+constant selfing rate. Its single-site probabilities average over selfing
+histories; they do not specify the joint distribution across loci in fixed
+individuals. Both physical linkage and shared histories can concentrate the
+composite-likelihood curve without a corresponding gain in sampling precision.
+LD pruning alone does not remove the shared-history dependence. The package
+reports uncalibrated likelihood support ranges and does not implement a
+calibrated confidence interval for this design.
 
 ## Frequently asked questions
 
@@ -166,18 +210,19 @@ orientation has been established independently.
 
 ### How much data do I need?
 
-There isn't a universal minimum. Informativeness depends more on the number of
-retained polymorphic sites and how strongly the likelihood is peaked than on a
-single sample-size cutoff. Check out `n_sites`, warnings, and the likelihood curve.
-You can also use repeated fixed-size subsets to assess sensitivity to which individuals were
-sampled, and you could use simulations to evaluate expected precision given some amount of data
-in a power-analysis kind of approach.
+There is no universal minimum. Both the number of individuals and the number
+of retained polymorphic sites matter. More sites characterize the spectrum of
+a fixed sample more closely, but do not add independent individual selfing
+histories. A sharply peaked likelihood alone does not establish precision.
+Inspect `n_sites`, warnings, and the curve, and use fixed-individual simulations
+with independent population replicates to assess performance for your design.
+Repeated subsets can help assess sensitivity to sample choice.
 
 ### Can I use linked SNPs?
 
-Yes, but linked sites are not independent. The estimate is based on a composite
-likelihood, so the reported support interval can be too narrow when linkage is
-ignored.
+Yes. Physical linkage adds dependence to the shared selfing histories of fixed
+individuals. The reported support interval is uncalibrated for both linked and
+unlinked loci.
 
 ### What should I do with missing, multiallelic, or non-diploid genotypes?
 
@@ -192,7 +237,7 @@ does not silently determine the result.
 
 ## Documentation
 
-- [Executed cookbook notebooks](docs/cookbook/README.md)
+- [Cookbook notebooks](docs/cookbook/README.md)
 - [Python API](docs/api.md)
 
 Run `selfdgs --help` or a subcommand's `--help` for command-line options.

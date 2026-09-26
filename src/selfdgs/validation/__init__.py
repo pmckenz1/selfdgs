@@ -6,6 +6,7 @@ depend on this subpackage.
 
 from selfdgs.validation.experiments import (
     LocusResult,
+    VCFResult,
     ReplicateResult,
     ValidationExperimentConfig,
     run_validation_experiment,
@@ -20,6 +21,7 @@ from selfdgs.validation.consolidation import (
 
 __all__ = [
     "LocusResult",
+    "VCFResult",
     "ReplicateResult",
     "ValidationExperimentConfig",
     "discover_validation_runs",

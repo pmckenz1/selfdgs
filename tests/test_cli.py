@@ -651,4 +651,5 @@ def test_cli_simulate_accepts_n_diploids_alias(tmp_path, monkeypatch):
 
     assert status == 0
     assert captured_configs[0].n_sample == 6
-    assert captured_configs[0].slim_script.name == "equilibrium_selfing.slim"
+    assert captured_configs[0].sampling_design == "fixed_individuals"
+    assert captured_configs[0].script_path().name == "fixed_individuals.slim"

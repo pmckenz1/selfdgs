@@ -25,7 +25,6 @@ from selfdgs.empirical import (
 from selfdgs.fit import fit_selfing
 from selfdgs.io.vcf import dgs_from_vcf, read_vcf_samples
 from selfdgs.model import dgs_probabilities, expected_dgs_branch_lengths
-from selfdgs.simulation import default_slim_script_path
 from selfdgs.spectrum import filter_polymorphic_dgs, read_dgs_csv, write_dgs_csv
 from selfdgs.validation import ValidationExperimentConfig, run_validation_experiment
 
@@ -618,9 +617,10 @@ def _simulate_command(args: argparse.Namespace) -> int:
     config = ValidationExperimentConfig(
         slim_script=args.slim_script,
         outdir=args.out,
-        ne=args.ne,
+        census_size=args.census_size,
         true_s=args.selfing_rate,
-        n_independent_loci=args.n_loci,
+        n_loci=args.n_loci,
+        sampling_design=args.sampling_design,
         chrom_length_each=args.chrom_length,
         mu=args.mu,
         recomb_rate=args.recomb_rate,
@@ -689,7 +689,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--support-drop",
         type=float,
         default=1.92,
-        help="Delta log-likelihood cutoff for the support interval.",
+        help="Delta log-likelihood cutoff for descriptive, uncalibrated support.",
     )
     fit_parser.add_argument("--refine", action="store_true", help="Refine the grid optimum.")
     fit_parser.add_argument("--refine-lower", type=float, default=0.0)
@@ -862,7 +862,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--support-drop",
         type=float,
         default=1.92,
-        help="Delta log-likelihood cutoff for draw support intervals.",
+        help="Delta log-likelihood cutoff for descriptive, uncalibrated draw support.",
     )
     empirical_parser.add_argument(
         "--low-polymorphic-site-threshold",
@@ -911,15 +911,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     simulate_parser.add_argument(
         "--slim-script",
-        default=default_slim_script_path(),
-        help="SLiM script path; defaults to the script bundled with selfdgs.",
+        default=None,
+        help="Custom SLiM script implementing the selected sampling-design contract.",
     )
     simulate_parser.add_argument("--out", required=True, help="Output directory.")
     simulate_parser.add_argument("--slim-executable", default="slim")
-    simulate_parser.add_argument("--ne", type=int, default=500, help="SLiM population size.")
+    simulate_parser.add_argument("--census-size", "--ne", dest="census_size", type=int, default=500, help="Diploid census population size.")
+    simulate_parser.add_argument(
+        "--sampling-design", choices=["fixed_individuals", "independent_populations"],
+        default="fixed_individuals",
+        help="Fixed individuals across shared-pedigree loci, or a separate population per locus.",
+    )
     simulate_parser.add_argument("--selfing-rate", type=float, default=0.5)
     simulate_parser.add_argument("--n-reps", type=int, default=1)
-    simulate_parser.add_argument("--n-loci", type=int, default=1)
+    simulate_parser.add_argument("--n-loci", type=int, default=1, help="Number of loci per fitted replicate.")
     simulate_parser.add_argument("--chrom-length", type=int, default=10_000)
     simulate_parser.add_argument("--mu", type=float, default=1e-7)
     simulate_parser.add_argument("--recomb-rate", type=float, default=5e-8)
@@ -929,7 +934,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="n_sample",
         type=int,
         default=4,
-        help="Number of diploid samples simulated and parsed per locus.",
+        help="Number of sampled diploid individuals per fitted dataset.",
     )
     simulate_parser.add_argument("--burn-mult", type=int, default=10)
     simulate_parser.add_argument("--seed", type=int, default=12345)
@@ -952,7 +957,7 @@ def build_parser() -> argparse.ArgumentParser:
             "folded is used, otherwise unfolded."
         ),
     )
-    _add_vcf_options(simulate_parser, include_n_diploids=False)
+    _add_vcf_options(simulate_parser, include_n_diploids=False, allow_skip_genotype=False)
     simulate_parser.set_defaults(func=_simulate_command)
 
     return parser

@@ -1,8 +1,9 @@
 # `selfdgs` Cookbook
 
-The cookbook contains three executed Jupyter notebooks. You can see the
-DGS tables, fit summaries, and plots in their outputs. The
-notebooks can be rerun and modified locally.
+The cookbook contains three Jupyter notebooks with examples of DGS tables,
+fit summaries, and plots. The first two contain teaching data generated from
+independent marginal DGS draws; they do not model shared histories in fixed
+individuals. The SLiM recipe simulates that biological sampling design.
 
 ## Recipes
 
@@ -12,9 +13,10 @@ notebooks can be rerun and modified locally.
 2. [Fixed-size subset analysis](02_subset_analysis.ipynb) generates a 12-sample,
    1,000-site pretend VCF with two simulated populations, then demonstrates 20
    reproducible draws per population, per-draw fits, summaries, and diagnostics.
-3. [SLiM validation](03_slim_validation.ipynb) simulates and pools 30
-   independent loci, fits the generating selfing rate, plots the likelihood,
-   and explains how to consolidate experiments across generating settings.
+3. [Fixed-individual SLiM validation](03_slim_validation.ipynb) samples the same
+   four individuals across 30 loci in one shared-pedigree population, fits the
+   DGS, and explains how to assess recovery across independent population
+   replicates. Requires SLiM 5.2 on `PATH`.
 
 ## Run the notebooks
 

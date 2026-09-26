@@ -112,8 +112,9 @@ def likelihood_support_interval(
 ) -> tuple[float, float] | None:
     """Return the grid support interval within ``drop`` log-likelihood units.
 
-    The default ``drop=1.92`` is the usual approximate 95% one-parameter
-    support cutoff from a likelihood-ratio test.
+    The default ``drop=1.92`` specifies a descriptive support set, not a
+    calibrated confidence interval. Shared individual selfing histories can
+    induce dependence even across unlinked loci, in addition to SNP linkage.
     """
     if not math.isfinite(drop) or drop < 0:
         raise ValueError("drop must be finite and non-negative.")
@@ -237,6 +238,7 @@ def grid_search_selfing(
         "epsilon": float(epsilon),
         "error_rate": float(error_rate),
         "support_drop": float(support_drop),
+        "uncertainty_calibration": "uncalibrated_composite_likelihood",
         "grid_size": len(grid),
         "mode": checked_mode,
         "probability_regularization": _regularization_name(
