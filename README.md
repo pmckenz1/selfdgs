@@ -151,10 +151,9 @@ expectations by pooling a separate population and sample for each locus.
 That control averages over individual histories and does not reproduce a
 fixed-individual genomic dataset. See the [validation recipe](docs/cookbook/03_slim_validation.ipynb).
 
-The simple `fit` vs. `empirical` commands use the same VCF scanning, filtering,
-polarization, DGS construction, and likelihood code. The `empirical` command just
-adds some potentially useful options like sample grouping and repeated fixed-size
-sample draws. Overlapping draws measure sensitivity to sample choice; they are
+The `fit` and `empirical` commands use the same VCF scanning, filtering,
+polarization, DGS construction, and likelihood code. The `empirical` command
+adds sample grouping and repeated fixed-size sample draws. Overlapping draws measure sensitivity to sample choice; they are
 not independent replicates and their likelihoods should not be summed.
 
 ## Read the outputs
@@ -200,7 +199,7 @@ Yes, but first assess population structure with STRUCTURE or a comparable
 method. Then run `selfdgs` separately on each identified subpopulation.
 Pooling differentiated subpopulations makes an apparent heterozygote deficit (the
 Wahlund effect), so ignoring structure can inflate the
-inferred selfing rate. Definitely interpret results cautiously when ancestry is admixed or
+inferred selfing rate. Interpret results cautiously when ancestry is admixed or
 subpopulation assignments are unknown.
 
 ### What if I don't know the ancestral allele?
@@ -230,10 +229,6 @@ The VCF reader expects diploid, biallelic genotypes. By default, an entire site
 is skipped if any requested sample has a missing genotype. Filter or recode unsupported records before
 fitting, and review how much data was excluded so that missingness or filtering
 does not silently determine the result.
-
-## Future development
-
-- Per-site variable sample size to better maximize information in the presence of missing data
 
 ## Documentation
 

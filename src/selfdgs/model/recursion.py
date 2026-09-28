@@ -1,8 +1,8 @@
 """Kingman branch lengths for DGS classes.
 
 The combinatorial implementation is used by default by the public model API.
-The fully articulated state-by-state recursion remains here as a readable
-reference implementation and as an independent correctness check.
+The state-by-state recursion provides a reference implementation and an
+independent correctness check.
 """
 
 from __future__ import annotations
